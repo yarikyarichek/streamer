@@ -5,12 +5,6 @@ import (
 	"gorm.io/gorm"
 )
 
-type Service interface {
-	Migrate() error
-	Create(msg *entity.Message) error
-	Get(filter *entity.Message, offset, limit int) (*entity.Messages, error)
-}
-
 type dbService struct {
 	*gorm.DB
 }
@@ -24,8 +18,8 @@ func (service *dbService) Migrate() error {
 	return nil
 }
 
-func (service *dbService) Create(msg *entity.Message) error {
-	return service.DB.Create(&msg).Error
+func (service *dbService) Create(msgs *entity.Messages) error {
+	return service.DB.Create(msgs).Error
 }
 
 func (service *dbService) Get(filter *entity.Message, offset, limit int) (*entity.Messages, error) {
