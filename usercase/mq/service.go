@@ -2,6 +2,7 @@ package mq
 
 import (
 	"io"
+	"log"
 	"runtime"
 	"sync"
 
@@ -18,7 +19,7 @@ type service struct {
 	w       io.Writer
 	storage []entity.Messages
 	query   chan *entity.Message
-	cdone   chan int
+	done    chan int
 }
 
 func NewService(size, maxProc int, w io.Writer, repo repository.Service) Service {
@@ -45,7 +46,7 @@ func NewService(size, maxProc int, w io.Writer, repo repository.Service) Service
 		w:       w,
 		storage: storage,
 		query:   make(chan *entity.Message, 100000),
-		cdone:   make(chan int),
+		done:    make(chan int),
 	}
 }
 
@@ -56,6 +57,49 @@ func (s *service) Query() chan *entity.Message {
 func (s *service) Size() int {
 	return s.size
 }
-func (s *service) Clear() {}
 
-func (s *service) Start() {}
+func (s *service) Clear() {
+	s.mux.Lock()
+	defer s.mux.Unlock()
+	for i := range s.storage {
+		err := s.repo.Create(&s.storage[i])
+		if err != nil {
+			log.Println(err)
+		}
+		s.storage[i] = make(entity.Messages, 0, s.size)
+	}
+}
+
+func (s *service) Start() {
+	go s.schedule()
+	for i := range s.storage {
+		s.done <- i
+	}
+}
+
+func (s *service) schedule() {
+	for {
+		i, opened := <-s.done
+		if !opened {
+			return
+		}
+		go s.run(i)
+	}
+}
+
+func (s *service) run(i int) {
+	for {
+		s.storage[i] = append(s.storage[i], <-s.query)
+		if len(s.storage[i]) == s.size {
+			break
+		}
+	}
+	s.mux.Lock()
+	err := s.repo.Create(&s.storage[i])
+	if err != nil {
+		log.Println(err)
+	}
+	s.storage[i] = make(entity.Messages, 0, s.size)
+	s.mux.Unlock()
+	s.done <- i
+}

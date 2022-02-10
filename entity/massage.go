@@ -13,4 +13,4 @@ type Message struct {
 	Text      string
 }
 
-type Messages []Message
+type Messages []*Message
