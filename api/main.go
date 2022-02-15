@@ -2,9 +2,37 @@ package main
 
 import (
 	"fmt"
-	"runtime"
+	"log"
+	"os"
+
+	"github.com/yarikyarichek/streamer/api/handler"
+	"github.com/yarikyarichek/streamer/config"
+	"github.com/yarikyarichek/streamer/infostructure/repository"
+	"github.com/yarikyarichek/streamer/usercase/mq"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func main() {
-	fmt.Println(runtime.GOMAXPROCS(0))
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=Asia/Shanghai",
+		config.DB_HOST, config.DB_USER, config.DB_PASSWORD, config.DB_DATABASE, config.DB_PORT)
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	repo := repository.NewService(db)
+
+	err = repo.Migrate()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	mqSrv := mq.NewService(10, 4, os.Stdout, repo)
+
+	err = handler.NewService(mqSrv, repo).Start()
+	log.Fatal(err)
 }
