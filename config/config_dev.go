@@ -7,5 +7,5 @@ const (
 	DB_HOST     = "127.0.0.1"
 	DB_PORT     = "5432"
 	API_HOST    = "127.0.0.1"
-	API_PORT    = "9095"
+	API_PORT    = "9002"
 )

@@ -2,7 +2,6 @@ package handler
 
 import (
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
 	"net/http"
 
@@ -22,82 +21,109 @@ func NewService(mqSrv mq.Service, repo repository.Service) Service {
 }
 
 func (srv *service) Start() error {
+	srv.mq.Start()
 	http.HandleFunc("/messages", srv.messages)
 	http.HandleFunc("/clear", srv.clear)
 	return http.ListenAndServe(config.API_HOST+":"+config.API_PORT, nil)
 }
 
 func (srv *service) messages(w http.ResponseWriter, req *http.Request) {
-	switch req.Method {
-	case "GET":
 
-		fmt.Println(1)
+	var resp interface{}
+
+	switch req.Method {
+
+	case "GET":
 
 		var m presenter.GetMessageRequest
 
 		bytes, err := ioutil.ReadAll(req.Body)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			srv.handleError(w, err)
 			return
 		}
 
-		fmt.Println(2)
-
 		if len(bytes) > 0 {
-			fmt.Println(21)
 			err = json.Unmarshal(bytes, &m)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
+				srv.handleError(w, err)
 				return
 			}
 		}
-		fmt.Println(3)
 
 		messeges, err := srv.repo.Get(m.ToMessage(), m.Offset, m.ValidateLimit())
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			srv.handleError(w, err)
 			return
 		}
 
-		fmt.Println(4, *messeges)
-
-		srv.handleResponse(w, messeges)
+		resp = messeges
 
 	case "POST":
 
-		var m presenter.CreateMessegeRequests
-		err := json.NewDecoder(req.Body).Decode(&m)
+		bytes, err := ioutil.ReadAll(req.Body)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		err = srv.repo.Create(m.ToMessage())
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			srv.handleError(w, err)
 			return
 		}
 
-		srv.handleResponse(w, &presenter.CreateMessegeResponse{Status: "created"})
+		if len(bytes) > 0 {
+			var m presenter.CreateMessegeRequests
+			err = json.Unmarshal(bytes, &m)
+			if err != nil {
+				srv.handleError(w, err)
+				return
+			}
+
+			// non-multi-threaded option
+			// err = srv.repo.Create(m.ToMessage())
+			// if err != nil {
+			// 	srv.handleError(w, err)
+			// 	return
+			// }
+			// resp = &presenter.CreateMessegeResponse{Status: "created"}
+
+			c := srv.mq.Query()
+			for _, message := range m {
+				c <- message.ToMessage()
+			}
+
+			resp = &presenter.CreateMessegeResponse{Status: "pushed"}
+
+		} else {
+			resp = &presenter.CreateMessegeResponse{Status: "can't parse body"}
+		}
 
 	default:
-		http.Error(w, "Sorry, only GET and POST methods are supported.", http.StatusBadRequest)
-		return
+		resp = &presenter.CreateMessegeResponse{Status: "method not allowed"}
 	}
+
+	r, _ := json.Marshal(resp)
+	w.Header().Add("Content-Type", "application/json")
+
+	w.Write(r)
 
 }
 
 func (srv *service) clear(w http.ResponseWriter, req *http.Request) {
+
+	var resp interface{}
+
 	switch req.Method {
 	case "POST":
 		srv.mq.Clear()
-
+		resp = &presenter.CreateMessegeResponse{Status: "cleared"}
 	default:
-		http.Error(w, "Sorry, only POST method is supported.", http.StatusBadRequest)
+		resp = &presenter.CreateMessegeResponse{Status: "method not allowed"}
 	}
-}
 
-func (srv *service) handleResponse(w http.ResponseWriter, resp interface{}) {
 	r, _ := json.Marshal(resp)
 	w.Write(r)
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Add("Content-Type", "application/json")
+}
+
+func (srv *service) handleError(w http.ResponseWriter, err error) {
+	r, _ := json.Marshal(&presenter.CreateMessegeResponse{Status: err.Error()})
+	w.Write(r)
+	w.Header().Add("Content-Type", "application/json")
 }
